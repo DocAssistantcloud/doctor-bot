@@ -1,152 +1,81 @@
-// ДОКТОР БОТ - СТАБИЛЬНАЯ ВЕРСИЯ
-// Копируйте ВЕСЬ этот текст и заменяйте старый файл
-
-console.log("Бот запускается...");
+// БОТ ДЛЯ RAILWAY - ПРОСТАЯ РАБОЧАЯ ВЕРСИЯ
+console.log("🚀 Бот запускается...");
 
 const TelegramBot = require('node-telegram-bot-api');
 
-// ВАШ ТОКЕН (замените на свой)
-const token = '7586407454:AAGHXTJ_iTPq7wNY9IqUTzAEZ2IL7hFsR_Y';
-const bot = new TelegramBot(token, { 
+// ========== ВАШИ ДАННЫЕ ==========
+// ЗАМЕНИТЕ ТОЛЬКО ЭТИ 2 СТРОКИ ↓
+const BOT_TOKEN = '7586407454:AAGHXTJ_iTPq7wNY9IqUTzAEZ2IL7hFsR_Y';
+const ADMIN_ID = '@Cullinanholder';
+// =================================
+
+console.log("Токен:", BOT_TOKEN ? "✅ Есть" : "❌ НЕТ!");
+console.log("Админ ID:", ADMIN_ID || "❌ Не указан");
+
+if (!BOT_TOKEN) {
+    console.error("❌ ОШИБКА: Нет токена бота!");
+    console.error("Замените BOT_TOKEN в коде на ваш токен");
+    process.exit(1);
+}
+
+if (!ADMIN_ID) {
+    console.warn("⚠️ Внимание: Админ ID не указан. Уведомления не будут приходить.");
+}
+
+// Создаем бота
+const bot = new TelegramBot(BOT_TOKEN, { 
     polling: {
-        interval: 300, // интервал опроса
+        interval: 300,
         timeout: 10,
         limit: 100,
-        retryTimeout: 5000,
-        params: {
-            timeout: 10
-        }
+        retryTimeout: 5000
     }
 });
 
-// ВАШ ID в Telegram для уведомлений
-const ADMIN_CHAT_ID = '8231278236';
-
-// Хранилища данных
+// База данных в памяти
 let appointments = [];
 let nextId = 1;
-const userStates = new Map(); // Состояния пользователей
-const supportChats = new Set(); // Активные чаты поддержки
+const userStates = {};
+const supportChats = new Set();
 
-// Клавиатура для пользователя
-function createUserKeyboard() {
+// Клавиатура
+function createKeyboard() {
     return {
         reply_markup: {
             keyboard: [
                 ['📅 Записаться на прием'],
                 ['📋 Мои записи'],
                 ['❌ Отменить запись'],
-                ['🆘 Техническая поддержка']
+                ['🆘 Техподдержка']
             ],
-            resize_keyboard: true,
-            one_time_keyboard: false
+            resize_keyboard: true
         }
     };
 }
 
-// Клавиатура для быстрого ответа администратору
-function createAdminReplyKeyboard(userChatId) {
-    return {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: '💬 Ответить', callback_data: `reply_${userChatId}` },
-                    { text: '✅ Завершить', callback_data: `close_${userChatId}` }
-                ]
-            ]
-        }
-    };
-}
-
-// Безопасная отправка сообщений
-function safeSendMessage(chatId, text, options = {}) {
-    return bot.sendMessage(chatId, text, options)
-        .catch(err => {
-            console.error(`Ошибка отправки в чат ${chatId}:`, err.message);
-            // Если чат заблокировал бота, удаляем из поддержки
-            if (err.response && err.response.body && err.response.body.error_code === 403) {
-                supportChats.delete(chatId);
-                userStates.delete(chatId);
-            }
-        });
-}
-
-// Обработка команды /start
+// Команда /start
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    safeSendMessage(chatId, 
+    bot.sendMessage(chatId, 
         '👋 Здравствуйте! Я бот для записи к врачу.\n\n' +
         'Выберите действие на клавиатуре ниже:', 
-        createUserKeyboard());
+        createKeyboard());
 });
 
-// Обработка инлайн-кнопок (админские)
-bot.on('callback_query', async (callbackQuery) => {
-    try {
-        const msg = callbackQuery.message;
-        const data = callbackQuery.data;
-        const adminId = callbackQuery.from.id;
-        
-        // Проверяем, что это администратор
-        if (adminId.toString() !== ADMIN_CHAT_ID) {
-            await bot.answerCallbackQuery(callbackQuery.id, { 
-                text: 'Только администратор может использовать эти кнопки' 
-            });
-            return;
-        }
-        
-        if (data.startsWith('reply_')) {
-            const userChatId = data.split('_')[1];
-            await bot.answerCallbackQuery(callbackQuery.id);
-            
-            // Сохраняем состояние для ответа
-            userStates.set(adminId, { 
-                type: 'admin_reply', 
-                targetChatId: userChatId 
-            });
-            
-            await safeSendMessage(adminId, 
-                `✍️ Введите ответ для пользователя (ID: ${userChatId}):\n` +
-                `Или отправьте /cancel для отмены`);
-        }
-        else if (data.startsWith('close_')) {
-            const userChatId = data.split('_')[1];
-            
-            // Удаляем из поддержки
-            supportChats.delete(parseInt(userChatId));
-            
-            // Уведомляем пользователя
-            await safeSendMessage(userChatId, 
-                '✅ Диалог с поддержкой завершен.\n' +
-                'Если у вас остались вопросы, нажмите "🆘 Техническая поддержка" снова.',
-                createUserKeyboard());
-            
-            // Обновляем сообщение админа
-            await bot.answerCallbackQuery(callbackQuery.id, { text: 'Чат поддержки закрыт' });
-            await bot.editMessageText(
-                `✅ Чат поддержки ${userChatId} закрыт.`,
-                { chat_id: msg.chat.id, message_id: msg.message_id }
-            );
-        }
-    } catch (err) {
-        console.error('Ошибка в callback_query:', err);
-    }
-});
-
-// Обработка кнопки "Записаться"
+// Запись на прием
 bot.onText(/Записаться на прием/, (msg) => {
     const chatId = msg.chat.id;
     
-    // Выходим из режима поддержки если были в нем
+    // Выходим из поддержки если были там
     if (supportChats.has(chatId)) {
         supportChats.delete(chatId);
     }
     
-    userStates.set(chatId, { step: 1 });
-    safeSendMessage(chatId, 'Полное ФИО', createUserKeyboard());
+    userStates[chatId] = { step: 1 };
+    bot.sendMessage(chatId, '📝 Полное ФИО:', createKeyboard());
 });
 
-// Обработка кнопки "Мои записи"
+// Мои записи
 bot.onText(/Мои записи/, (msg) => {
     const chatId = msg.chat.id;
     
@@ -157,17 +86,21 @@ bot.onText(/Мои записи/, (msg) => {
     const userAppointments = appointments.filter(app => app.chatId === chatId);
     
     if (userAppointments.length === 0) {
-        safeSendMessage(chatId, 'У вас пока нет активных записей.', createUserKeyboard());
+        bot.sendMessage(chatId, '📭 У вас пока нет активных записей.', createKeyboard());
     } else {
         let message = '📋 Ваши записи:\n\n';
         userAppointments.forEach(app => {
-            message += `№${app.id}\n👤 ФИО: ${app.patientName}\n📅 Дата: ${app.date} в ${app.time}\n📞 Телефон: ${app.phone}\n────────────\n`;
+            message += `№${app.id}\n`;
+            message += `👤 ФИО: ${app.patientName}\n`;
+            message += `📅 Дата: ${app.date} в ${app.time}\n`;
+            message += `📞 Телефон: ${app.phone}\n`;
+            message += `────────────\n`;
         });
-        safeSendMessage(chatId, message, createUserKeyboard());
+        bot.sendMessage(chatId, message, createKeyboard());
     }
 });
 
-// Обработка кнопки "Отменить запись"
+// Отменить запись
 bot.onText(/Отменить запись/, (msg) => {
     const chatId = msg.chat.id;
     
@@ -178,7 +111,7 @@ bot.onText(/Отменить запись/, (msg) => {
     const userAppointments = appointments.filter(app => app.chatId === chatId);
     
     if (userAppointments.length === 0) {
-        safeSendMessage(chatId, 'У вас нет записей для отмены.', createUserKeyboard());
+        bot.sendMessage(chatId, '❌ У вас нет записей для отмены.', createKeyboard());
         return;
     }
     
@@ -187,154 +120,129 @@ bot.onText(/Отменить запись/, (msg) => {
         message += `№${app.id} - ${app.date} ${app.time}\n`;
     });
     
-    userStates.set(chatId, { step: 'cancel' });
-    safeSendMessage(chatId, message, createUserKeyboard());
+    userStates[chatId] = { step: 'cancel' };
+    bot.sendMessage(chatId, message, createKeyboard());
 });
 
-// Обработка кнопки "Техническая поддержка"
-bot.onText(/Техническая поддержка/, (msg) => {
+// Техподдержка
+bot.onText(/Техподдержка/, (msg) => {
     const chatId = msg.chat.id;
     const userName = msg.from.first_name || 'Пользователь';
-    const userUsername = msg.from.username ? `@${msg.from.username}` : 'нет username';
     
     // Включаем режим поддержки
     supportChats.add(chatId);
     
     // Сообщение пользователю
-    safeSendMessage(chatId, 
+    bot.sendMessage(chatId, 
         '🆘 Вы подключены к технической поддержке!\n\n' +
         'Напишите ваш вопрос, и администратор ответит вам здесь.\n' +
-        'Для выхода из поддержки нажмите любую кнопку меню.\n\n' +
-        'Ожидайте ответа...',
-        createUserKeyboard());
+        'Для выхода из режима поддержки нажмите любую кнопку меню.\n\n' +
+        '⏳ Ожидайте ответа...',
+        createKeyboard());
     
-    // Уведомление администратору
-    const adminMessage = 
-        `🚨 НОВЫЙ ЗАПРОС В ТЕХПОДДЕРЖКУ!\n\n` +
-        `👤 Имя: ${userName}\n` +
-        `📱 Username: ${userUsername}\n` +
-        `🆔 ID чата: ${chatId}\n` +
-        `⏰ Время: ${new Date().toLocaleString('ru-RU')}`;
-    
-    safeSendMessage(ADMIN_CHAT_ID, adminMessage, createAdminReplyKeyboard(chatId))
-        .then(() => {
-            console.log(`✅ Уведомление отправлено администратору о чате ${chatId}`);
-        })
-        .catch(err => {
-            console.error('❌ Ошибка отправки уведомления:', err.message);
-        });
-});
-
-// Команда /cancel для отмены действий
-bot.onText(/\/cancel/, (msg) => {
-    const chatId = msg.chat.id;
-    
-    if (userStates.has(chatId)) {
-        userStates.delete(chatId);
-        safeSendMessage(chatId, '❌ Действие отменено.', createUserKeyboard());
+    // Уведомление администратору (если ID указан)
+    if (ADMIN_ID) {
+        const adminMessage = 
+            `🚨 НОВЫЙ ЗАПРОС В ТЕХПОДДЕРЖКУ!\n\n` +
+            `👤 Имя: ${userName}\n` +
+            `🆔 ID чата: ${chatId}\n` +
+            `⏰ Время: ${new Date().toLocaleString('ru-RU')}\n\n` +
+            `💬 Для связи с пользователем:\n` +
+            `1. Напишите этому боту\n` +
+            `2. Или используйте ID: ${chatId}`;
+        
+        bot.sendMessage(ADMIN_ID, adminMessage)
+            .then(() => {
+                console.log(`✅ Уведомление отправлено администратору о чате ${chatId}`);
+            })
+            .catch(err => {
+                console.error('❌ Ошибка отправки уведомления:', err.message);
+            });
     }
 });
 
-// Обработка ВСЕХ сообщений
-bot.on('message', async (msg) => {
-    try {
-        const chatId = msg.chat.id;
-        const text = msg.text || '';
+// Обработка всех сообщений
+bot.on('message', (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text || '';
+    
+    // Пропускаем команды и кнопки
+    if (text.startsWith('/') || 
+        text === '📅 Записаться на прием' ||
+        text === '📋 Мои записи' ||
+        text === '❌ Отменить запись' ||
+        text === '🆘 Техподдержка') {
+        return;
+    }
+    
+    // Если пользователь в режиме поддержки
+    if (supportChats.has(chatId)) {
+        const userName = msg.from.first_name || 'Пользователь';
         
-        // Пропускаем команды и кнопки (они уже обработаны)
-        if (text.startsWith('/') || 
-            text === '📅 Записаться на прием' ||
-            text === '📋 Мои записи' ||
-            text === '❌ Отменить запись' ||
-            text === '🆘 Техническая поддержка') {
-            return;
-        }
-        
-        // Если администратор отвечает пользователю
-        if (chatId.toString() === ADMIN_CHAT_ID) {
-            const state = userStates.get(chatId);
-            
-            if (state && state.type === 'admin_reply') {
-                const targetChatId = state.targetChatId;
-                
-                // Проверяем, что чат еще в поддержке
-                if (!supportChats.has(parseInt(targetChatId))) {
-                    await safeSendMessage(chatId, '❌ Этот пользователь больше не в режиме поддержки.');
-                    userStates.delete(chatId);
-                    return;
-                }
-                
-                // Отправляем ответ пользователю
-                await safeSendMessage(targetChatId, 
-                    `📩 Ответ от поддержки:\n\n${text}\n\n` +
-                    `Если вопрос решен, нажмите любую кнопку меню.`,
-                    createUserKeyboard());
-                
-                await safeSendMessage(chatId, `✅ Ответ отправлен пользователю ${targetChatId}`);
-                userStates.delete(chatId);
-                return;
-            }
-        }
-        
-        // Если пользователь в режиме поддержки
-        if (supportChats.has(chatId)) {
-            const userName = msg.from.first_name || 'Пользователь';
+        // Пересылаем сообщение администратору
+        if (ADMIN_ID) {
             const userMessage = 
                 `💬 Сообщение от пользователя:\n\n` +
                 `👤 ${userName} (ID: ${chatId}):\n` +
                 `${text}`;
             
-            await safeSendMessage(ADMIN_CHAT_ID, userMessage, createAdminReplyKeyboard(chatId));
-            await safeSendMessage(chatId, '✅ Ваше сообщение отправлено поддержке. Ожидайте ответа...');
-            return;
+            bot.sendMessage(ADMIN_ID, userMessage)
+                .catch(err => {
+                    console.log('Не удалось отправить админу:', err.message);
+                });
         }
         
-        // Если пользователь в процессе записи
-        const state = userStates.get(chatId);
-        if (state) {
-            if (state.step === 1) {
-                state.name = text;
-                state.step = 2;
-                await safeSendMessage(chatId, 'На какую дату хотите записаться? (Например: 20 декабря)', createUserKeyboard());
-            }
-            else if (state.step === 2) {
-                state.date = text;
-                state.step = 3;
-                await safeSendMessage(chatId, 'На какое время? (Например: 14:30)', createUserKeyboard());
-            }
-            else if (state.step === 3) {
-                state.time = text;
-                state.step = 4;
-                await safeSendMessage(chatId, 'Ваш номер телефона для связи? (Например: 89161234567)', createUserKeyboard());
-            }
-            else if (state.step === 4) {
-                const phone = text;
-                
-                // Сохраняем запись
-                const appointment = {
-                    id: nextId++,
-                    patientName: state.name,
-                    date: state.date,
-                    time: state.time,
-                    phone: phone,
-                    chatId: chatId
-                };
-                
-                appointments.push(appointment);
-                userStates.delete(chatId);
-                
-                // Отправляем подтверждение
-                await safeSendMessage(chatId, 
-                    `✅ Запись успешно создана!\n\n` +
-                    `📋 Номер записи: ${appointment.id}\n` +
-                    `👤 ФИО: ${state.name}\n` +
-                    `📅 Дата: ${state.date}\n` +
-                    `⏰ Время: ${state.time}\n` +
-                    `📞 Телефон: ${phone}\n\n` +
-                    `Запись сохранена. Администратор свяжется с вами.`,
-                    createUserKeyboard());
-                
-                // Уведомление администратору
+        bot.sendMessage(chatId, '✅ Ваше сообщение отправлено поддержке. Ожидайте ответа...');
+        return;
+    }
+    
+    // Если пользователь в процессе записи
+    const state = userStates[chatId];
+    if (state) {
+        if (state.step === 1) {
+            state.name = text;
+            state.step = 2;
+            bot.sendMessage(chatId, '📅 На какую дату хотите записаться? (Например: 20 декабря)', createKeyboard());
+        }
+        else if (state.step === 2) {
+            state.date = text;
+            state.step = 3;
+            bot.sendMessage(chatId, '⏰ На какое время? (Например: 14:30)', createKeyboard());
+        }
+        else if (state.step === 3) {
+            state.time = text;
+            state.step = 4;
+            bot.sendMessage(chatId, '📞 Ваш номер телефона для связи? (Например: 89161234567)', createKeyboard());
+        }
+        else if (state.step === 4) {
+            const phone = text;
+            
+            // Сохраняем запись
+            const appointment = {
+                id: nextId++,
+                patientName: state.name,
+                date: state.date,
+                time: state.time,
+                phone: phone,
+                chatId: chatId
+            };
+            
+            appointments.push(appointment);
+            delete userStates[chatId];
+            
+            // Отправляем подтверждение
+            bot.sendMessage(chatId, 
+                `✅ Запись успешно создана!\n\n` +
+                `📋 Номер записи: ${appointment.id}\n` +
+                `👤 ФИО: ${state.name}\n` +
+                `📅 Дата: ${state.date}\n` +
+                `⏰ Время: ${state.time}\n` +
+                `📞 Телефон: ${phone}\n\n` +
+                `💾 Запись сохранена. Администратор свяжется с вами.`,
+                createKeyboard());
+            
+            // Уведомление администратору (если ID указан)
+            if (ADMIN_ID) {
                 const newAppointmentMsg = 
                     `📋 НОВАЯ ЗАПИСЬ!\n\n` +
                     `👤 ФИО: ${state.name}\n` +
@@ -343,23 +251,24 @@ bot.on('message', async (msg) => {
                     `📞 Телефон: ${phone}\n` +
                     `🆔 ID записи: ${appointment.id}`;
                 
-                await safeSendMessage(ADMIN_CHAT_ID, newAppointmentMsg);
-            }
-            else if (state.step === 'cancel') {
-                const idToCancel = parseInt(text);
-                const appointment = appointments.find(app => app.id === idToCancel);
-                
-                if (appointment && appointment.chatId === chatId) {
-                    appointments = appointments.filter(app => app.id !== idToCancel);
-                    userStates.delete(chatId);
-                    await safeSendMessage(chatId, `✅ Запись №${idToCancel} отменена.`, createUserKeyboard());
-                } else {
-                    await safeSendMessage(chatId, 'Запись не найдена. Проверьте номер.', createUserKeyboard());
-                }
+                bot.sendMessage(ADMIN_ID, newAppointmentMsg)
+                    .catch(() => {
+                        console.log('Новая запись:', newAppointmentMsg);
+                    });
             }
         }
-    } catch (err) {
-        console.error('❌ Критическая ошибка в обработке сообщения:', err);
+        else if (state.step === 'cancel') {
+            const idToCancel = parseInt(text);
+            const appointment = appointments.find(app => app.id === idToCancel);
+            
+            if (appointment && appointment.chatId === chatId) {
+                appointments = appointments.filter(app => app.id !== idToCancel);
+                delete userStates[chatId];
+                bot.sendMessage(chatId, `✅ Запись №${idToCancel} отменена.`, createKeyboard());
+            } else {
+                bot.sendMessage(chatId, '❌ Запись не найдена. Проверьте номер.', createKeyboard());
+            }
+        }
     }
 });
 
@@ -368,24 +277,12 @@ bot.on('polling_error', (error) => {
     console.error('❌ Ошибка polling:', error.code || error.message);
 });
 
-bot.on('webhook_error', (error) => {
-    console.error('❌ Ошибка webhook:', error);
-});
-
-// Восстановление после ошибок
 process.on('uncaughtException', (error) => {
     console.error('❌ Необработанная ошибка:', error);
-    // Автоматический перезапуск через 5 секунд
-    setTimeout(() => {
-        console.log('🔄 Перезапуск бота после ошибки...');
-        process.exit(1);
-    }, 5000);
 });
 
-// Автоматическое сохранение данных каждые 5 минут
-setInterval(() => {
-    console.log(`📊 Статистика: ${appointments.length} записей, ${supportChats.size} активных чатов поддержки`);
-}, 5 * 60 * 1000);
-
+console.log("=========================================");
 console.log("✅ Бот запущен и готов к работе!");
-console.log("📱 Для остановки нажмите Ctrl+C");
+console.log("🤖 Бот работает на Railway 24/7");
+console.log("📱 Для остановки: Railway → Stop Service");
+console.log("=========================================");
